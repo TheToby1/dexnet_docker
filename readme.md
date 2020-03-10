@@ -1,0 +1,1 @@
+Place this folder beside the dex-net folder in your file structure. Then run build.sh from their common parent folder.
