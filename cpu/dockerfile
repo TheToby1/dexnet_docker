@@ -1,0 +1,155 @@
+FROM ubuntu:16.04
+
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    software-properties-common \
+    python-dev \
+    python-pip \
+    cmake \
+    libvtk5-dev \
+    python-sip \
+    python-qt4 \
+    libosmesa6-dev \
+    meshlab \
+    libhdf5-dev \
+    mesa-utils \
+    build-essential \
+    gcc \
+    git \
+    sudo \
+    libgl1-mesa-glx \
+    libgl1-mesa-dri \
+    libgl1-mesa-dri \
+    x11-xserver-utils \
+    x11vnc \
+    xinit \
+    xserver-xorg-video-dummy \
+    xserver-xorg-input-void \
+    dirmngr \
+    gnupg2 \
+    lsb-release \
+    libboost-dev \
+    libboost-all-dev \
+    freeglut3-dev \
+    libspatialindex-dev \
+    python-rtree \
+    python-tk \
+    libxmu-dev \
+    libxi-dev \
+    locales \
+    locales-all \
+    g++ && \
+    rm -rf /var/lib/apt/lists/*
+
+#fixes weird comma vs dot seperated numbers in meshlab
+RUN locale-gen en_US.UTF-8 && export LC_NUMERIC='en_US.UTF-8'
+# install pip deps
+RUN python -m pip install --upgrade pip && python -m pip install setuptools && \
+    python -m pip install vtk pycollada pyopengl==3.1.0 sympy numpy scipy scikit-learn scikit-image opencv-python pyassimp h5py catkin_pkg matplotlib multiprocess dill cvxopt ipython pillow pyhull setproctitle trimesh
+
+#install openrave
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    minizip \
+    qt4-dev-tools \
+    libassimp-dev \
+    libavcodec-dev \
+    libavformat-dev \
+    libboost-date-time-dev \
+    libbullet-dev \
+    libfaac-dev \
+    libglew-dev \
+    libgsm1-dev \
+    liblapack-dev \
+    liblog4cxx-dev \
+    libmpfr-dev \
+    libode-dev \
+    libogg-dev \
+    libpcrecpp0v5 \
+    libpcre3-dev \
+    libqhull-dev \
+    libqt4-dev \
+    libsoqt-dev-common \
+    libsoqt4-dev \
+    libswscale-dev \
+    libvorbis-dev \
+    libx264-dev \
+    libxml2-dev \
+    libxvidcore-dev \
+    libcairo2-dev \
+    libjasper-dev \
+    libpoppler-glib-dev \
+    libsdl2-dev \
+    libtiff5-dev \
+    libxrandr-dev \
+    libccd-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN mkdir deps
+WORKDIR /deps 
+
+RUN git clone https://github.com/rdiankov/collada-dom.git && \
+    cd collada-dom && mkdir build && cd build && \
+    cmake .. && \
+    make -j"$(nproc)" && \
+    make install && cd ../.. && rm -rf collada-dom
+
+RUN git clone --branch OpenSceneGraph-3.4 https://github.com/openscenegraph/OpenSceneGraph.git && \
+    cd OpenSceneGraph && mkdir build && cd build && \
+    cmake .. -DDESIRED_QT_VERSION=4 && \
+    make -j"$(nproc)" && \
+    make install && cd ../.. && rm -rf OpenSceneGraph
+
+RUN git clone https://github.com/flexible-collision-library/fcl.git && \
+    cd fcl && git checkout 0.5.0 && \
+    mkdir build && cd build && \
+    cmake .. && \
+    make -j"$(nproc)" && \
+    make install && cd ../.. && rm -rf fcl && \
+    ln -sf /usr/include/eigen3/Eigen /usr/include/Eigen
+
+RUN git clone --branch latest_stable https://github.com/rdiankov/openrave.git && \
+    cd openrave && mkdir build && cd build && \
+    cmake .. -DOSG_DIR=/usr/local/lib64/ && \
+    make -j"$(nproc)" && \
+    make install && cd ../.. && rm -rf openrave
+
+# install main deps
+RUN git clone https://github.com/jeffmahler/SDFGen.git && \
+    cd SDFGen && \
+    sh install.sh
+
+RUN git clone https://github.com/jeffmahler/Boost.NumPy.git && \
+    cd Boost.NumPy && \
+    sh install.sh
+# Set the LD_LIBRARY_PATH so that boost.numpy is picked up be meshrender
+ENV LD_LIBRARY_PATH=/usr/local/lib:/usr/local/lib64
+
+RUN git clone https://github.com/BerkeleyAutomation/meshpy.git && \
+    cd meshpy && \
+    python setup.py develop
+ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/deps/meshpy/meshpy
+
+RUN git clone https://github.com/BerkeleyAutomation/autolab_core.git && \
+    cd autolab_core && \
+    python setup.py develop 
+
+RUN git clone https://github.com/BerkeleyAutomation/perception.git && \
+    cd perception && \
+    python setup.py develop 
+
+#seds to change versions
+RUN git clone https://github.com/BerkeleyAutomation/gqcnn.git && \
+    cd gqcnn && \
+    sed -i 's/pyglet==1.4.0b1/pyglet==1.4.10/g' setup.py && \
+    python setup.py develop
+
+RUN git clone https://github.com/BerkeleyAutomation/visualization.git && \
+    cd visualization && \
+    sed -i 's/imageio/imageio==2.6/g' setup.py && \
+    python setup.py develop
+
+COPY dex-net dex-net
+# install dex-net
+RUN cd dex-net && find . -type f -exec sed -i 's/from gqcnn import Grasp2D/from gqcnn.grasping import Grasp2D/g; s/from gqcnn import Visualizer2D/from visualization import Visualizer2D/g' {} + && python setup.py develop
+
+# won't install with the other python deps for some reason + old version doesn't play nice with vtk so install from git
+RUN pip install git+https://github.com/enthought/mayavi.git
